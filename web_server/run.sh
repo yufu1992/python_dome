@@ -1,0 +1,1 @@
+python3 web_sever.py 7788 mini_frame:application

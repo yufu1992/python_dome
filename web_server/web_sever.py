@@ -2,19 +2,22 @@ import socket
 import re
 import multiprocessing
 import time
-import mini_frame
-
+# import dynamic.mini_frame
+import sys
 
 class WSGIServer(object):
-    def __init__(self):
+    def __init__(self, post, app, static_path):
         # 1. 创建套接字
         self.tcp_server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.tcp_server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
         # 2. 绑定
-        self.tcp_server_socket.bind(("", 7890))
+        self.tcp_server_socket.bind(("", post))
         # 3. 变为监听套接字
         self.tcp_server_socket.listen(128)
+
+        self.application = app
+        self.static_path = static_path
 
 
     def sercvice_client(self, new_socket):
@@ -71,7 +74,7 @@ class WSGIServer(object):
             # 	# 将response boy发送给浏览器
             # 	new_socket.send(html_content)
             try:
-                f = open("./html" + file_name, "rb")
+                f = open(self.static_path + file_name, "rb")
             except:
                 response = "HTTP/1.1 404 NOT FOUND\r\n"
                 response += "\r\n"
@@ -89,10 +92,17 @@ class WSGIServer(object):
                 new_socket.send(html_content)
         else:
             # 2.0.1 如果是以.py结尾ide，就是动态请求
-            header = "HTTP/1.1 200 OK\r\n"
-            header += "\r\n"
 
-            body = mini_frame.application(file_name)
+            env = dict()
+            env['PATH_INFO'] = file_name
+            body = self.application(env, self.set_response_header)
+
+            header = "HTTP/1.1 %s\r\n" % self.status
+
+            for temp in self.headers:
+                header += "%s:%s\r\n" % (temp[0], temp[1])
+
+            header += "\r\n"
 
             response = header+body
             # 发送response给浏览器
@@ -101,6 +111,11 @@ class WSGIServer(object):
 
         # 关闭套接
         new_socket.close()
+
+    def set_response_header(self, status, headers):
+        self.status = status
+        self.headers = headers
+
 
     def run_forever(self):
         """用来完成完整的控制"""
@@ -121,7 +136,39 @@ class WSGIServer(object):
 
 def main():
     """控制整体，创建一个web服务器对象，然后调用这个对象的run_forever方法运行"""
-    wsgi_server = WSGIServer()
+
+    if len(sys.argv) == 3:
+        try:
+            port = int(sys.argv[1])
+            frame_app_name = sys.argv[2]
+        except Exception as ret:
+            print("端口输入错误。。。。")
+            return
+    else:
+        print("请按照以下方式运行")
+        print ("python3 xxx.py 7890 mini_frame:application")
+        return
+
+    ret = re.match(r"([^:]+):(.*)", frame_app_name)
+    if ret:
+        frame_name = ret.group(1) # mini_frame
+        app_name = ret.group(2) # application
+    else:
+        print("请按照以下方式运行")
+        print ("python3 xxx.py 7890 mini_frame:application")
+        return
+
+    with open("./web_server.conf") as f:
+        conf_info = eval(f.read())
+
+    sys.path.append(conf_info["dynamic_path"])
+
+    # import frame_name --> 找frame_name.py
+    frame = __import__(frame_name)  # 返回值标记这导入的这个模块
+    app = getattr(frame, app_name)  # 此时app就指向dynamic的mini_frame模块中的app方法
+
+
+    wsgi_server = WSGIServer(port, app, conf_info["static_path"])
     wsgi_server.run_forever()
 
 if __name__ == "__main__":
